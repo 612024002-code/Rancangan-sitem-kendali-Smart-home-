@@ -1,0 +1,101 @@
+/*
+ * CONTOH KODE TERINTEGRASI EDGE IMPULSE & RELAY
+ * Ganti baris di bawah dengan nama library yang Anda unduh dari Edge Impulse
+ */
+#include <Nama_Library_Edge_Impulse_Anda_inferencing.h>
+#include <driver/i2s.h>
+
+// Definisi Pin Relay
+#define RELAY_LAMPU 10 // Channel 1
+#define RELAY_KIPAS 11 // Channel 2
+
+// Definisi Pin I2S INMP441
+#define I2S_SCK     41
+#define I2S_WS      42
+#define I2S_SD      2
+#define I2S_PORT    I2S_NUM_0
+
+// Variabel buffer audio untuk Edge Impulse
+#define SAMPLE_RATE 16000
+short sampleBuffer[EI_CLASSIFIER_SLICE_SIZE];
+
+void setup() {
+    Serial.begin(115200);
+    
+    // Inisialisasi Relay (Active LOW)
+    pinMode(RELAY_LAMPU, OUTPUT);
+    pinMode(RELAY_KIPAS, OUTPUT);
+    digitalWrite(RELAY_LAMPU, HIGH); // Matikan awal
+    digitalWrite(RELAY_KIPAS, HIGH); // Matikan awal
+
+    // Konfigurasi I2S untuk INMP441
+    i2s_config_t i2s_config = {
+        .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+        .sample_rate = SAMPLE_RATE,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .dma_buf_count = 8,
+        .dma_buf_len = 64,
+        .use_apll = false,
+        .tx_desc_auto_clear = false,
+        .fixed_mclk = 0
+    };
+    
+    i2s_pin_config_t pin_config = {
+        .bck_io_num = I2S_SCK,
+        .ws_io_num = I2S_WS,
+        .data_out_num = I2S_PIN_NO_CHANGE,
+        .data_in_num = I2S_SD
+    };
+    
+    i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
+    i2s_set_pin(I2S_PORT, &pin_config);
+    Serial.println("Sistem Smart Home AI Siap!");
+}
+
+void loop() {
+    // 1. Rekam data dari Mikrofon INMP441 ke buffer
+    size_t bytesIn = 0;
+    i2s_read(I2S_PORT, &sampleBuffer, sizeof(sampleBuffer), &bytesIn, portMAX_DELAY);
+
+    // 2. Siapkan sinyal untuk Edge Impulse
+    signal_t signal;
+    int err = microphone_audio_signal_get_data(sizeof(sampleBuffer), 0, sizeof(sampleBuffer), &signal);
+    
+    // 3. Jalankan Inferencing AI
+    ei_impulse_result_t result = { 0 };
+    err = run_classifier(&signal, &result, false);
+    if (err != EI_IMPULSE_OK) return;
+
+    // 4. Cari kata dengan probabilitas tertinggi (di atas 70%)
+    for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+        if (result.classification[ix].value > 0.7) {
+            String command = String(result.classification[ix].label);
+            Serial.println(command);
+
+            // 5. Logika Kontrol Relay
+            if (command == "hidupkan lampu") {
+                digitalWrite(RELAY_LAMPU, LOW); // Relay ON
+            } 
+            else if (command == "matikan lampu") {
+                digitalWrite(RELAY_LAMPU, HIGH); // Relay OFF
+            } 
+            else if (command == "hidupkan kipas") {
+                digitalWrite(RELAY_KIPAS, LOW); // Relay ON
+            } 
+            else if (command == "matikan kipas") {
+                digitalWrite(RELAY_KIPAS, HIGH); // Relay OFF
+            }
+        }
+    }
+}
+
+// Fungsi bantu untuk membaca buffer (wajib untuk library Edge Impulse)
+int microphone_audio_signal_get_data(size_t offset, size_t length, float *out_ptr) {
+    for (size_t i = 0; i < length; i++) {
+        out_ptr[i] = (float)sampleBuffer[offset + i];
+    }
+    return 0;
+}
