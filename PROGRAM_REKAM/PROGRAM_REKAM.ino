@@ -158,3 +158,6 @@ void loop() {
     }
   }
 }
+
+
+Link edge implus https://studio.edgeimpulse.com/public/1128389/live
